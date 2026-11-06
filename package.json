@@ -1,0 +1,27 @@
+{
+  "name": "rgr_oop",
+  "version": "1.0.0",
+  "description": "**Hello**",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prashchukdanylo-stack/RGR_OOP.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/prashchukdanylo-stack/RGR_OOP/issues"
+  },
+  "homepage": "https://github.com/prashchukdanylo-stack/RGR_OOP#readme",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}
