@@ -23,4 +23,7 @@ class Dog extends Animal {
     public bark():void {
         console.log("Woof");
     }
+    protected eatBone() : string {
+        return "am nam nam";
+    }
 }

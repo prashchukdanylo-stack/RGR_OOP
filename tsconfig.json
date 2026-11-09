@@ -9,5 +9,5 @@
     "outDir": "./dist",
     "types": ["node"]
   },
-  "include": ["index.ts", "sample.ts", "parser.ts"]
+  "include": ["index.ts", "sample.ts", "parser.ts", "generator.ts"]
 }
