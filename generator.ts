@@ -4,10 +4,12 @@ import {ClassModel} from './parser';
 export class DiagramGenerator {
     private classes: ClassModel[];
     private outputPath: string;
+    private diagramPath:string;
 
-    constructor(classes: ClassModel[], outputPath: string) {
+    constructor(classes: ClassModel[], outputPath: string, diagramPath: string) {
         this.classes = classes;
         this.outputPath = outputPath;
+        this.diagramPath = diagramPath;
     }
 
     public generate() : void {
@@ -20,16 +22,29 @@ export class DiagramGenerator {
                 mmdContext += ` ${field.visibility}${field.name} : ${field.type}\n`;
             }
             for (const method of cls.methods) {
-                mmdContext += ` ${method.visibility}${method.name} : ${method.type}\n`;
+                mmdContext += ` ${method.visibility}${method.name}(${method.parameters})${method.type}\n`;
             }
-
             mmdContext += ` }\n\n`;
-
-            if (cls.extendsClass) {
-                mmdContext += ` ${cls.extendsClass} <|-- ${cls.name}\n`;
-            }
         }
+            for (const cls of this.classes) {
+                if (cls.extendsClass) {
+                mmdContext += ` ${cls.extendsClass} <|-- ${cls.name}\n`;
+            };
+            if (cls.relations) {
+                for (const rel of cls.relations) {
+                    if (rel.type === 'aggregation') {
+                        mmdContext += ` ${rel.to} o-- ${rel.from}\n`;
+                    } else {
+                        mmdContext += ` ${rel.to} --> ${rel.from}\n`;
+                    }
+            }
+            }
+            }
+
 
         fs.writeFileSync(this.outputPath, mmdContext, 'utf-8');
+        const diagram = `\`\`\`mermaid\n${mmdContext}\`\`\`\n`;
+        console.log(diagram);
+        fs.writeFileSync(this.diagramPath, diagram, 'utf-8');
     }
 }
