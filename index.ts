@@ -5,7 +5,7 @@ import { DiagramGenerator } from "./generator";
 class Application {
   public run(): void {
     console.log("Програма запустилася");
-    const targetFile = path.join(__dirname, "../sample.ts");
+    const targetFile = path.join(__dirname, "../samples");
     const outputFile = path.join(__dirname, "../output.mmd");
     const diagramFile = path.join(__dirname, "../diagram.md");
 

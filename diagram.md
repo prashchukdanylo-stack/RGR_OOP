@@ -1,70 +1,49 @@
 ```mermaid
 classDiagram
-    class AuditService {
-        +write(eventName: string, detail?: string) void
-    }
-
-    class ShippingZone {
-        +region : string [readonly]
-        +postalCode? : string
-        +constructor(region: string, postalCode?: string)
-    }
-
-    class PromoCode {
-        +code : string [readonly]
-        +discountPercent : number [readonly]
-        +constructor(code: string, discountPercent: number)
-    }
-
-    class LineItem {
-        +sku : string [readonly]
-        +qty : number [readonly]
-        +constructor(sku: string, qty: number)
-    }
-
-    class BaseRecord {
+    class BaseEntity {
         <<abstract>>
-        +id : number [readonly]
-        +kind : string [readonly]*
-        +VERSION : string [readonly]$
-        +constructor(id: number)
-        +validate() boolean*
-        +createId() number$
+        +id : string [readonly]
+        +constructor(id: string)
+        +describe() string*
     }
 
-    class PurchaseOrder {
-        +kind : string [readonly]
-        +channel : string [readonly]
+    class LineEntry {
+        +sku : string [readonly]
+        +quantity : number [readonly]
         +note? : string
-        -items : LineItem[] [readonly]
-        -promo? : PromoCode
-        -zone : ShippingZone [readonly]
-        +constructor(id: number, zone: ShippingZone, rawItems: ( sku: string, qty: number )[], promo?: PromoCode)
-        +validate() boolean
-        +notify(message: string, urgent?: boolean) void
-        +archive(audit: AuditService, reason?: string) void
+        +constructor(id: string, sku: string, quantity: number, note?: string)
+        +describe() string
     }
 
-    class CustomerAccount {
-        +orders : PurchaseOrder[] [readonly]
-        +email : string [readonly]
-        +nickname? : string
-        +constructor(email: string, nickname?: string)
-        +addOrder(order: PurchaseOrder) void
+    class CustomerOrder {
+        +entries : LineEntry[] [readonly]
+        +shippingAddress? : string
+        +constructor(id: string, shippingAddress?: string)
+        +addItem(sku: string, quantity: number, note?: string) void
+        +describe() string
     }
 
-    class INotifiable {
+    class OrderProcessor {
+        -gateway : IPaymentGateway [readonly]
+        +constructor(gateway: IPaymentGateway)
+        +checkout(order: CustomerOrder, totalAmount: number, currency?: string) boolean
+    }
+
+    class IIdentifiable {
         <<interface>>
-        +channel : string [readonly]
-        +note? : string
-        +notify(message: string, urgent?: boolean) void
+        +id : string [readonly]
     }
 
-    BaseRecord <|-- PurchaseOrder
-    PurchaseOrder *-- LineItem
-    PurchaseOrder --> PromoCode
-    PurchaseOrder --> ShippingZone
-    PurchaseOrder ..> AuditService
-    PurchaseOrder ..|> INotifiable
-    CustomerAccount o-- PurchaseOrder
+    class IPaymentGateway {
+        <<interface>>
+        +providerName : string [readonly]
+        +charge(amount: number, currency?: string) boolean
+    }
+
+    BaseEntity ..|> IIdentifiable
+    BaseEntity <|-- LineEntry
+    BaseEntity <|-- CustomerOrder
+    CustomerOrder o-- LineEntry
+    OrderProcessor --> IPaymentGateway
+    OrderProcessor ..> CustomerOrder
 ```

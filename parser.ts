@@ -1,5 +1,6 @@
 import * as ts from "typescript";
 import * as fs from "fs";
+import * as path from "path";
 
 export interface ClassMember {
   name: string;
@@ -49,33 +50,96 @@ export interface FieldRegistrationOptions {
 }
 
 export class ClassParser {
-  private filePath: string;
+  private targetPath: string;
+  private ignoredDirs: Set<string>;
 
-  constructor(filePath: string) {
-    this.filePath = filePath;
+  constructor(
+    targetPath: string,
+    ignoredDirs: string[] = ["node_modules", "dist", "build", ".git"],
+  ) {
+    this.targetPath = targetPath;
+    this.ignoredDirs = new Set(ignoredDirs);
   }
 
   public parse(): ParseResult {
-    if (!fs.existsSync(this.filePath)) {
-      console.error("Файл не знайдено: ", this.filePath);
+    if (!fs.existsSync(this.targetPath)) {
+      console.error("Шлях не знайдено: ", this.targetPath);
       return { classes: [], interfaces: [] };
     }
 
-    const fileContent = fs.readFileSync(this.filePath, "utf-8");
-    const sourceFile = ts.createSourceFile(
-      this.filePath,
-      fileContent,
-      ts.ScriptTarget.Latest,
-      true,
-    );
+    const filePaths = this.collectTypeScriptFiles(this.targetPath);
+    if (filePaths.length === 0) {
+      console.error("Не знайдено .ts файлів за шляхом: ", this.targetPath);
+      return { classes: [], interfaces: [] };
+    }
 
+    const sourceFiles: ts.SourceFile[] = [];
     const knownTypes = new Set<string>();
-    this.collectKnownTypes(sourceFile, knownTypes);
+
+    for (const filePath of filePaths) {
+      const fileContent = fs.readFileSync(filePath, "utf-8");
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        fileContent,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      sourceFiles.push(sourceFile);
+      this.collectKnownTypes(sourceFile, knownTypes);
+    }
+    
 
     const classes: ClassModel[] = [];
     const interfaces: InterfaceModel[] = [];
-    this.visit(sourceFile, sourceFile, classes, knownTypes, interfaces);
+    for (const sourceFile of sourceFiles) {
+        this.visit(sourceFile, sourceFile, classes, knownTypes, interfaces);
+    }
+    
     return { classes, interfaces };
+  }
+
+  private collectTypeScriptFiles(entryPath: string): string[] {
+    const stat = fs.statSync(entryPath);
+    if (stat.isFile()) {
+        return this.isTargetTsFile(entryPath) ? [entryPath] : [];
+    }
+    if (!stat.isDirectory()) {
+        return [];
+    }
+
+    const results: string[] = [];
+    const entries = fs.readdirSync(entryPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const fullPath = path.join(entryPath, entry.name);
+
+      if (entry.isDirectory()) {
+        if (!this.ignoredDirs.has(entry.name)) {
+          results.push(...this.collectTypeScriptFiles(fullPath));
+        }
+      } else if (entry.isFile() && this.isTargetTsFile(fullPath)) {
+        results.push(fullPath);
+      }
+    }
+
+    return results.sort();
+  }
+
+  private isTargetTsFile(filePath: string) : boolean {
+    if (!filePath.endsWith(".ts") || filePath.endsWith(".d.ts")) {
+        return false;
+    }
+    if (
+      filePath.endsWith(".test.ts") ||
+      filePath.endsWith(".spec.ts")
+    ) {
+      return false;
+    }
+    return true;
   }
 
   private collectKnownTypes(node: ts.Node, knownTypes: Set<string>): void {
@@ -271,17 +335,14 @@ export class ClassParser {
                 param,
                 ts.SyntaxKind.AbstractKeyword,
               );
-            
-              registerFieldAndRelation(
-                paramName,
-                paramType,
-                paramVisibility,
-                {isStatic: paramIsStatic,
+
+              registerFieldAndRelation(paramName, paramType, paramVisibility, {
+                isStatic: paramIsStatic,
                 isReadonly: paramIsReadonly,
                 isAbstract: paramIsAbstract,
                 isOptional: Boolean(param.questionToken),
-                initializer: param.initializer},
-              );
+                initializer: param.initializer,
+              });
             }
           }
 
@@ -368,7 +429,7 @@ export class ClassParser {
             type: propType,
             visibility,
             isReadonly,
-            isOptional: Boolean(member.questionToken)
+            isOptional: Boolean(member.questionToken),
           });
         } else if (ts.isMethodSignature(member) && member.name) {
           const methodName = member.name.getText(sourceFile);
