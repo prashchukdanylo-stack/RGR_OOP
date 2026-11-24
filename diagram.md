@@ -1,40 +1,65 @@
 ```mermaid
 classDiagram
- class Animal {
- +name : string
- #age : number
- +constructor(name: string, age: number) 
- +move() void
- }
+    class BaseEntity {
+        <<abstract>>
+        +id : number
+        +createdAt : Date
+        +constructor(id: number)
+    }
 
- class Dog {
- -breed : string
- -bestToy : Array~Bone~
- -constructor(name: string, age: number, breed: string, bestToy: Array~Bone~) 
- -getOneAgeMore(age: number) number
- +bark() void
- #eatBone() string
- +swim() void
- +dive() void
- }
+    class OrderItem {
+        +productName : string
+        +quantity : number
+        +price : number
+        +constructor(productName: string, quantity: number, price: number)
+    }
 
- class Bone {
- -name : string
- +constructor(name: string) 
- }
+    class DiscountCoupon {
+        +code : string
+        +percent : number
+        +constructor(code: string, percent: number)
+    }
 
- class Swimmable {
- <<interface>>
- +swim() void
- }
+    class DeliveryAddress {
+        +city : string
+        +street : string
+        +constructor(city: string, street: string)
+    }
 
- class Proswimmer {
- <<interface>>
- +dive() void
- }
+    class Logger {
+        +log(message: string) void
+    }
 
- Animal <|-- Dog
- Dog o-- Bone
- Dog ..|> Proswimmer
- Swimmable <|-- Proswimmer
+    class Customer {
+        +orders : Order[]
+        +name : string
+        +constructor(name: string)
+        +addOrder(order: Order) void
+    }
+
+    class Order {
+        +status : string
+        -items : OrderItem[]
+        -coupon : DiscountCoupon
+        +customer : Customer
+        +deliveryAddress : DeliveryAddress
+        +constructor(id: number, customer: Customer, deliveryAddress: DeliveryAddress, rawItems: ( name: string, qty: number, price: number )[], coupon: DiscountCoupon)
+        +calculateTotal() number
+        +pay(amount: number) boolean
+        +save(logger: Logger) void
+    }
+
+    class IPayable {
+        <<interface>>
+        +pay(amount: number) boolean
+    }
+
+    Customer o-- Order
+    BaseEntity <|-- Order
+    Order *-- OrderItem
+    Order --> DiscountCoupon
+    Order --> Customer
+    Order --> DeliveryAddress
+    Order ..> Logger
+    Order ..|> IPayable
 ```

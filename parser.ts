@@ -1,5 +1,4 @@
 import * as ts from "typescript";
-import * as path from "path";
 import * as fs from "fs";
 
 export interface ClassMember {
@@ -11,6 +10,7 @@ export interface ClassMember {
 
 export interface ClassModel {
   name: string;
+  isAbstract?: boolean;
   fields: ClassMember[];
   methods: ClassMember[];
   extendsClass?: string;
@@ -21,18 +21,19 @@ export interface ClassModel {
 export interface ClassRelation {
   from: string;
   to: string;
-  type: "association" | "aggregation";
+  type: "association" | "aggregation" | "composition" | "dependency";
 }
+
 export interface InterfaceModel {
-    name: string;
-    fields: ClassMember[];
-    methods: ClassMember[];
-    extendsInterfaces?: string[];
+  name: string;
+  fields: ClassMember[];
+  methods: ClassMember[];
+  extendsInterfaces?: string[];
 }
 
 export interface ParseResult {
-    classes: ClassModel[];
-    interfaces: InterfaceModel[];
+  classes: ClassModel[];
+  interfaces: InterfaceModel[];
 }
 
 export class ClassParser {
@@ -45,8 +46,9 @@ export class ClassParser {
   public parse(): ParseResult {
     if (!fs.existsSync(this.filePath)) {
       console.error("Файл не знайдено: ", this.filePath);
-      return {classes: [], interfaces: []};
+      return { classes: [], interfaces: [] };
     }
+
     const fileContent = fs.readFileSync(this.filePath, "utf-8");
     const sourceFile = ts.createSourceFile(
       this.filePath,
@@ -54,36 +56,59 @@ export class ClassParser {
       ts.ScriptTarget.Latest,
       true,
     );
-    const classNames = new Set<string>();
-    this.collectClassNames(sourceFile, classNames);
+
+    const knownTypes = new Set<string>();
+    this.collectKnownTypes(sourceFile, knownTypes);
 
     const classes: ClassModel[] = [];
     const interfaces: InterfaceModel[] = [];
-    this.visit(sourceFile, sourceFile, classes,classNames, interfaces);
-    return {classes, interfaces};
+    this.visit(sourceFile, sourceFile, classes, knownTypes, interfaces);
+    return { classes, interfaces };
   }
 
-  private collectClassNames(node: ts.Node, classNames: Set<string>): void {
-    if (ts.isClassDeclaration(node) && node.name) {
-      classNames.add(node.name.text);
+  private collectKnownTypes(node: ts.Node, knownTypes: Set<string>): void {
+    if (
+      (ts.isClassDeclaration(node) || ts.isInterfaceDeclaration(node)) &&
+      node.name
+    ) {
+      knownTypes.add(node.name.text);
     }
-    ts.forEachChild(node, (child) => this.collectClassNames(child, classNames));
+    ts.forEachChild(node, (child) => this.collectKnownTypes(child, knownTypes));
+  }
+
+  private extractBaseTypeName(typeStr: string): string {
+    const genericInner = typeStr.trim().match(/^[^<]+<(.+)>$/);
+    const inner = genericInner ? genericInner[1] : typeStr.trim();
+    return inner.replace(/\[\]|<.*>|\|/g, "").trim();
+  }
+
+  private hasAbstractModifier(node: ts.HasModifiers): boolean {
+    const modifiers = ts.canHaveModifiers(node)
+      ? ts.getModifiers(node)
+      : undefined;
+    return Boolean(
+      modifiers?.some((mod) => mod.kind === ts.SyntaxKind.AbstractKeyword),
+    );
   }
 
   private visit(
     node: ts.Node,
     sourceFile: ts.SourceFile,
     classes: ClassModel[],
-    classNames: Set<string>,
-    interfaces: InterfaceModel[]
+    knownTypes: Set<string>,
+    interfaces: InterfaceModel[],
   ): void {
     if (ts.isClassDeclaration(node) && node.name) {
       const className = node.name.text;
+      const isAbstract = this.hasAbstractModifier(node);
       const fields: ClassMember[] = [];
       const methods: ClassMember[] = [];
       const relations: ClassRelation[] = [];
       let extendsClass: string | undefined = undefined;
       const implementsInterfaces: string[] = [];
+      const composedInConstructor = new Set<string>();
+      const structuralTargets = new Set<string>();
+      const dependencyCandidates = new Set<string>();
 
       if (node.heritageClauses) {
         for (const clause of node.heritageClauses) {
@@ -92,13 +117,78 @@ export class ClassParser {
             clause.types.length > 0
           ) {
             extendsClass = clause.types[0].expression.getText(sourceFile);
+            structuralTargets.add(this.extractBaseTypeName(extendsClass));
           } else if (clause.token === ts.SyntaxKind.ImplementsKeyword) {
             for (const exprWithTypeArgs of clause.types) {
-                implementsInterfaces.push(exprWithTypeArgs.expression.getText(sourceFile));
+              const ifaceName = exprWithTypeArgs.expression.getText(sourceFile);
+              implementsInterfaces.push(ifaceName);
+              structuralTargets.add(this.extractBaseTypeName(ifaceName));
             }
           }
         }
       }
+
+      for (const member of node.members) {
+        if (ts.isConstructorDeclaration(member) && member.body) {
+          this.collectConstructorNewAssignments(
+            member.body,
+            composedInConstructor,
+          );
+        }
+      }
+
+      const registerFieldAndRelation = (
+        propName: string,
+        propType: string,
+        visibility: "+" | "-" | "#",
+        initializer?: ts.Expression,
+      ): void => {
+        fields.push({
+          name: propName,
+          type: propType,
+          visibility,
+        });
+
+        const normalizedType = propType.trim();
+        const genericMatch = normalizedType.match(
+          /^(?:Array|ReadonlyArray|Set|ReadonlySet)<(.+)>$/,
+        );
+        const isCollection =
+          normalizedType.includes("[]") || Boolean(genericMatch);
+        const cleanType = this.extractBaseTypeName(propType);
+
+        if (knownTypes.has(cleanType) && cleanType !== className) {
+          structuralTargets.add(cleanType);
+
+          const hasDirectNew = initializer
+            ? this.containsNewExpression(initializer)
+            : false;
+          const isComposed =
+            hasDirectNew || composedInConstructor.has(propName);
+
+          const relationType: "association" | "aggregation" | "composition" =
+            isComposed
+              ? "composition"
+              : isCollection
+                ? "aggregation"
+                : "association";
+
+          const alreadyExists = relations.some(
+            (rel) =>
+              rel.from === className &&
+              rel.to === cleanType &&
+              rel.type === relationType,
+          );
+
+          if (!alreadyExists) {
+            relations.push({
+              from: className,
+              to: cleanType,
+              type: relationType,
+            });
+          }
+        }
+      };
 
       node.members.forEach((member) => {
         const visibility = this.getVisibility(member as ts.HasModifiers);
@@ -108,37 +198,12 @@ export class ClassParser {
           const propType = member.type
             ? member.type.getText(sourceFile)
             : "any";
-          fields.push({
-            name: propName,
-            type: propType,
-            visibility: visibility,
-          });
-
-          const normalizedType = propType.trim();
-          const genericMatch = normalizedType.match(/^(?:Array|ReadonlyArray|Set|ReadonlySet)<(.+)>$/);
-          const isCollection = normalizedType.includes("[]") || Boolean(genericMatch);
-          const cleanType = genericMatch ? genericMatch[1].replace(/\[\]|<.*>/g, "").trim()
-          : normalizedType.replace(/\[\]|<.*>/g, "").trim();
-
-          if (classNames.has(cleanType) && cleanType !== className) {
-            
-            const relationType: "association" | "aggregation" = isCollection
-              ? "aggregation"
-              : "association";
-            const alreadyExists = relations.some(
-              (rel) =>
-                rel.from === className &&
-                rel.to === cleanType &&
-                rel.type === relationType,
-            );
-            if (!alreadyExists) {
-              relations.push({
-                from: className,
-                to: cleanType,
-                type: isCollection ? "aggregation" : "association",
-              });
-            }
-          }
+          registerFieldAndRelation(
+            propName,
+            propType,
+            visibility,
+            member.initializer,
+          );
         } else if (ts.isMethodDeclaration(member) && member.name) {
           const methodName = member.name.getText(sourceFile);
           const returnType = member.type
@@ -148,76 +213,169 @@ export class ClassParser {
           methods.push({
             name: methodName,
             type: returnType,
-            visibility: visibility,
+            visibility,
             parameters: params,
           });
+
+          this.collectDependencyTypesFromSignature(
+            member.parameters,
+            member.type,
+            sourceFile,
+            className,
+            knownTypes,
+            dependencyCandidates,
+          );
         } else if (ts.isConstructorDeclaration(member)) {
+          for (const param of member.parameters) {
+            if (ts.isParameterPropertyDeclaration(param, param.parent)) {
+              const paramName = param.name.getText(sourceFile);
+              const paramType = param.type
+                ? param.type.getText(sourceFile)
+                : "any";
+              const paramVisibility = this.getVisibility(param);
+              registerFieldAndRelation(
+                paramName,
+                paramType,
+                paramVisibility,
+                param.initializer,
+              );
+            }
+          }
+
           const params = this.parseParameters(member.parameters, sourceFile);
           methods.push({
             name: "constructor",
             type: "",
-            visibility: visibility,
+            visibility,
+            parameters: params,
+          });
+
+          this.collectDependencyTypesFromSignature(
+            member.parameters,
+            undefined,
+            sourceFile,
+            className,
+            knownTypes,
+            dependencyCandidates,
+          );
+        }
+      });
+
+      for (const target of dependencyCandidates) {
+        if (!structuralTargets.has(target)) {
+          const alreadyExists = relations.some(
+            (rel) =>
+              rel.from === className &&
+              rel.to === target &&
+              rel.type === "dependency",
+          );
+          if (!alreadyExists) {
+            relations.push({
+              from: className,
+              to: target,
+              type: "dependency",
+            });
+          }
+        }
+      }
+
+      classes.push({
+        name: className,
+        isAbstract,
+        fields,
+        methods,
+        extendsClass,
+        relations,
+        implementsInterfaces,
+      });
+    }
+
+    if (ts.isInterfaceDeclaration(node) && node.name) {
+      const ifaceName = node.name.text;
+      const fields: ClassMember[] = [];
+      const methods: ClassMember[] = [];
+      const extendsInterfaces: string[] = [];
+
+      if (node.heritageClauses) {
+        for (const clause of node.heritageClauses) {
+          if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
+            for (const exprWithTypeArgs of clause.types) {
+              extendsInterfaces.push(
+                exprWithTypeArgs.expression.getText(sourceFile),
+              );
+            }
+          }
+        }
+      }
+
+      for (const member of node.members) {
+        const visibility = this.getVisibility(member as ts.HasModifiers);
+
+        if (ts.isPropertySignature(member) && member.name) {
+          const propName = member.name.getText(sourceFile);
+          const propType = member.type
+            ? member.type.getText(sourceFile)
+            : "any";
+          fields.push({
+            name: propName,
+            type: propType,
+            visibility,
+          });
+        } else if (ts.isMethodSignature(member) && member.name) {
+          const methodName = member.name.getText(sourceFile);
+          const methodType = member.type
+            ? member.type.getText(sourceFile)
+            : "void";
+          const params = this.parseParameters(member.parameters, sourceFile);
+          methods.push({
+            name: methodName,
+            type: methodType,
+            visibility,
             parameters: params,
           });
         }
-      });
-      classes.push({
-        name: className,
-        fields: fields,
-        methods: methods,
-        extendsClass: extendsClass,
-        relations: relations,
-        implementsInterfaces: implementsInterfaces
+      }
+
+      interfaces.push({
+        name: ifaceName,
+        fields,
+        methods,
+        extendsInterfaces,
       });
     }
-    if (ts.isInterfaceDeclaration(node) && node.name) {
-        const ifaceName = node.name.text;
-        const fields: ClassMember[] = [];
-        const methods: ClassMember[] = [];
-        const extendsInterfaces: string[] = [];
 
-        if (node.heritageClauses) {
-            for (const clause of node.heritageClauses) {
-                if (clause.token === ts.SyntaxKind.ExtendsKeyword) {
-                    for (const exprWithTypeArgs of clause.types) {
-                        extendsInterfaces.push(exprWithTypeArgs.expression.getText(sourceFile));
-                    }
-                }
-            }
-        }
-        for (const member of node.members) {
-            const visibility = this.getVisibility(member as ts.HasModifiers);
-
-            if (ts.isPropertySignature(member) && member.name) {
-                const propName = member.name.getText(sourceFile);
-                const propType = member.type ? member.type.getText(sourceFile) : "any";
-                fields.push({
-                    name: propName,
-                    type: propType,
-                    visibility
-                });
-            } else if (ts.isMethodSignature(member) && member.name) {
-                const methodName = member.name.getText(sourceFile);
-                const methodType = member.type ? member.type.getText(sourceFile) : "void";
-                const params = this.parseParameters(member.parameters, sourceFile);
-                methods.push({
-                    name: methodName,
-                    type: methodType,
-                    visibility,
-                    parameters: params
-                })
-            }
-        }
-        interfaces.push({
-            name: ifaceName,
-            fields,
-            methods,
-            extendsInterfaces
-        })
-    }
     ts.forEachChild(node, (child) =>
-      this.visit(child, sourceFile, classes, classNames, interfaces),
+      this.visit(child, sourceFile, classes, knownTypes, interfaces),
     );
+  }
+
+  private collectDependencyTypesFromSignature(
+    parameters: ts.NodeArray<ts.ParameterDeclaration>,
+    returnTypeNode: ts.TypeNode | undefined,
+    sourceFile: ts.SourceFile,
+    className: string,
+    knownTypes: Set<string>,
+    candidates: Set<string>,
+  ): void {
+    for (const param of parameters) {
+      if (param.type) {
+        const paramBaseType = this.extractBaseTypeName(
+          param.type.getText(sourceFile),
+        );
+        if (knownTypes.has(paramBaseType) && paramBaseType !== className) {
+          candidates.add(paramBaseType);
+        }
+      }
+    }
+
+    if (returnTypeNode) {
+      const returnBaseType = this.extractBaseTypeName(
+        returnTypeNode.getText(sourceFile),
+      );
+      if (knownTypes.has(returnBaseType) && returnBaseType !== className) {
+        candidates.add(returnBaseType);
+      }
+    }
   }
 
   private getVisibility(node: ts.HasModifiers): "+" | "-" | "#" {
@@ -243,5 +401,37 @@ export class ClassParser {
         return `${paramName}: ${paramType}`;
       })
       .join(", ");
+  }
+
+  private collectConstructorNewAssignments(
+    node: ts.Node,
+    targetProps: Set<string>,
+  ): void {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(node.left) &&
+      node.left.expression.kind === ts.SyntaxKind.ThisKeyword
+    ) {
+      if (this.containsNewExpression(node.right)) {
+        targetProps.add(node.left.name.text);
+      }
+    }
+    ts.forEachChild(node, (child) =>
+      this.collectConstructorNewAssignments(child, targetProps),
+    );
+  }
+
+  private containsNewExpression(node: ts.Node): boolean {
+    if (ts.isNewExpression(node)) {
+      return true;
+    }
+    let found = false;
+    ts.forEachChild(node, (child) => {
+      if (this.containsNewExpression(child)) {
+        found = true;
+      }
+    });
+    return found;
   }
 }

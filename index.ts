@@ -1,23 +1,30 @@
 import * as path from "path";
 import { ClassParser } from "./parser";
-import { DiagramGenerator} from "./generator";
+import { DiagramGenerator } from "./generator";
+
 class Application {
-    public run():void {
-        console.log("Програма запустилася");
-        const targetFile = path.join(__dirname, "../sample.ts");
-        const outputFile = path.join(__dirname, "../output.mmd");
-        const diagramFile = path.join(__dirname, "../diagram.md");
-        const parser = new ClassParser(targetFile);
-        const {classes, interfaces} = parser.parse();
+  public run(): void {
+    console.log("Програма запустилася");
+    const targetFile = path.join(__dirname, "../sample.ts");
+    const outputFile = path.join(__dirname, "../output.mmd");
+    const diagramFile = path.join(__dirname, "../diagram.md");
 
-        if (classes.length === 0 && interfaces.length === 0) {
-            console.log("Не знайдено жодного файлу");
-            return;
-        }
+    const parser = new ClassParser(targetFile);
+    const { classes, interfaces } = parser.parse();
 
-        const generator = new DiagramGenerator(classes, outputFile,diagramFile, interfaces);
-        generator.generate();
+    if (classes.length === 0 && interfaces.length === 0) {
+      console.log("Не знайдено жодного класу або інтерфейсу");
+      return;
     }
+
+    const generator = new DiagramGenerator(
+      classes,
+      outputFile,
+      diagramFile,
+      interfaces,
+    );
+    generator.generate();
+  }
 }
 
 const app = new Application();
