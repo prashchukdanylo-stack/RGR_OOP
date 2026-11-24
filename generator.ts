@@ -38,7 +38,9 @@ export class DiagramGenerator {
 
       for (const field of cls.fields) {
         const formattedType = this.formatMermaidType(field.type);
-        mmdContext += `        ${field.visibility}${field.name} : ${formattedType}\n`;
+        const readonlySuffix = field.isReadonly ? " [readonly]": "";
+        const staticSuffix = field.isStatic ? "$" : "";
+        mmdContext += `        ${field.visibility}${field.name} : ${formattedType}${readonlySuffix}${staticSuffix}\n`;
       }
 
       for (const method of cls.methods) {
@@ -48,7 +50,8 @@ export class DiagramGenerator {
         const formattedReturn = method.type
           ? ` ${this.formatMermaidType(method.type)}`
           : "";
-        mmdContext += `        ${method.visibility}${method.name}(${formattedParams})${formattedReturn}\n`;
+        const staticSuffix = method.isStatic ? "$" : "";
+        mmdContext += `        ${method.visibility}${method.name}(${formattedParams})${formattedReturn}${staticSuffix}\n`;
       }
 
       mmdContext += `    }\n\n`;

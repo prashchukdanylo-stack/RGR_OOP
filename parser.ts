@@ -6,6 +6,8 @@ export interface ClassMember {
   type: string;
   visibility: "+" | "-" | "#";
   parameters?: string;
+  isStatic?: boolean;
+  isReadonly?: boolean;
 }
 
 export interface ClassModel {
@@ -82,13 +84,11 @@ export class ClassParser {
     return inner.replace(/\[\]|<.*>|\|/g, "").trim();
   }
 
-  private hasAbstractModifier(node: ts.HasModifiers): boolean {
+  private hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
     const modifiers = ts.canHaveModifiers(node)
       ? ts.getModifiers(node)
       : undefined;
-    return Boolean(
-      modifiers?.some((mod) => mod.kind === ts.SyntaxKind.AbstractKeyword),
-    );
+    return Boolean(modifiers?.some((mod) => mod.kind === kind));
   }
 
   private visit(
@@ -100,7 +100,7 @@ export class ClassParser {
   ): void {
     if (ts.isClassDeclaration(node) && node.name) {
       const className = node.name.text;
-      const isAbstract = this.hasAbstractModifier(node);
+      const isAbstract = this.hasModifier(node, ts.SyntaxKind.AbstractKeyword);
       const fields: ClassMember[] = [];
       const methods: ClassMember[] = [];
       const relations: ClassRelation[] = [];
@@ -141,12 +141,16 @@ export class ClassParser {
         propName: string,
         propType: string,
         visibility: "+" | "-" | "#",
+        isStatic: boolean,
+        isReadonly: boolean,
         initializer?: ts.Expression,
       ): void => {
         fields.push({
           name: propName,
           type: propType,
           visibility,
+          isStatic,
+          isReadonly,
         });
 
         const normalizedType = propType.trim();
@@ -192,6 +196,11 @@ export class ClassParser {
 
       node.members.forEach((member) => {
         const visibility = this.getVisibility(member as ts.HasModifiers);
+        const isStatic = this.hasModifier(member, ts.SyntaxKind.StaticKeyword);
+        const isReadonly = this.hasModifier(
+          member,
+          ts.SyntaxKind.ReadonlyKeyword,
+        );
 
         if (ts.isPropertyDeclaration(member) && member.name) {
           const propName = member.name.getText(sourceFile);
@@ -202,6 +211,8 @@ export class ClassParser {
             propName,
             propType,
             visibility,
+            isStatic,
+            isReadonly,
             member.initializer,
           );
         } else if (ts.isMethodDeclaration(member) && member.name) {
@@ -215,6 +226,7 @@ export class ClassParser {
             type: returnType,
             visibility,
             parameters: params,
+            isStatic,
           });
 
           this.collectDependencyTypesFromSignature(
@@ -233,10 +245,20 @@ export class ClassParser {
                 ? param.type.getText(sourceFile)
                 : "any";
               const paramVisibility = this.getVisibility(param);
+              const paramIsStatic = this.hasModifier(
+                param,
+                ts.SyntaxKind.StaticKeyword,
+              );
+              const paramIsReadonly = this.hasModifier(
+                param,
+                ts.SyntaxKind.ReadonlyKeyword,
+              );
               registerFieldAndRelation(
                 paramName,
                 paramType,
                 paramVisibility,
+                paramIsStatic,
+                paramIsReadonly,
                 param.initializer,
               );
             }
@@ -310,6 +332,10 @@ export class ClassParser {
 
       for (const member of node.members) {
         const visibility = this.getVisibility(member as ts.HasModifiers);
+        const isReadonly = this.hasModifier(
+          member,
+          ts.SyntaxKind.ReadonlyKeyword,
+        );
 
         if (ts.isPropertySignature(member) && member.name) {
           const propName = member.name.getText(sourceFile);
@@ -320,6 +346,7 @@ export class ClassParser {
             name: propName,
             type: propType,
             visibility,
+            isReadonly,
           });
         } else if (ts.isMethodSignature(member) && member.name) {
           const methodName = member.name.getText(sourceFile);
