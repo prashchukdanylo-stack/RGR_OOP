@@ -38,9 +38,10 @@ export class DiagramGenerator {
 
       for (const field of cls.fields) {
         const formattedType = this.formatMermaidType(field.type);
+        const optionalMark = field.isOptional ? "?" : "";
         const readonlySuffix = field.isReadonly ? " [readonly]": "";
-        const staticSuffix = field.isStatic ? "$" : "";
-        mmdContext += `        ${field.visibility}${field.name} : ${formattedType}${readonlySuffix}${staticSuffix}\n`;
+        const classifierSuffix = field.isStatic ? "$" : field.isAbstract ? "*" : "";
+        mmdContext += `        ${field.visibility}${field.name}${optionalMark} : ${formattedType}${readonlySuffix}${classifierSuffix}\n`;
       }
 
       for (const method of cls.methods) {
@@ -50,8 +51,8 @@ export class DiagramGenerator {
         const formattedReturn = method.type
           ? ` ${this.formatMermaidType(method.type)}`
           : "";
-        const staticSuffix = method.isStatic ? "$" : "";
-        mmdContext += `        ${method.visibility}${method.name}(${formattedParams})${formattedReturn}${staticSuffix}\n`;
+        const classifierSuffix = method.isStatic ? "$" : method.isAbstract ? "*" : "";
+        mmdContext += `        ${method.visibility}${method.name}(${formattedParams})${formattedReturn}${classifierSuffix}\n`;
       }
 
       mmdContext += `    }\n\n`;
@@ -63,7 +64,9 @@ export class DiagramGenerator {
 
       for (const field of iface.fields) {
         const formattedType = this.formatMermaidType(field.type);
-        mmdContext += `        ${field.visibility}${field.name} : ${formattedType}\n`;
+        const optionalMark = field.isOptional ? "?" : "";
+        const readonlySuffix = field.isReadonly ? " [readonly]" : "";
+        mmdContext += `        ${field.visibility}${field.name}${optionalMark} : ${formattedType}${readonlySuffix}\n`;
       }
 
       for (const method of iface.methods) {

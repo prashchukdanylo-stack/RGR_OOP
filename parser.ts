@@ -8,6 +8,8 @@ export interface ClassMember {
   parameters?: string;
   isStatic?: boolean;
   isReadonly?: boolean;
+  isAbstract?: boolean;
+  isOptional?: boolean;
 }
 
 export interface ClassModel {
@@ -36,6 +38,14 @@ export interface InterfaceModel {
 export interface ParseResult {
   classes: ClassModel[];
   interfaces: InterfaceModel[];
+}
+
+export interface FieldRegistrationOptions {
+  isStatic: boolean;
+  isReadonly: boolean;
+  isAbstract?: boolean;
+  isOptional?: boolean;
+  initializer?: ts.Expression;
 }
 
 export class ClassParser {
@@ -141,16 +151,16 @@ export class ClassParser {
         propName: string,
         propType: string,
         visibility: "+" | "-" | "#",
-        isStatic: boolean,
-        isReadonly: boolean,
-        initializer?: ts.Expression,
+        options: FieldRegistrationOptions,
       ): void => {
         fields.push({
           name: propName,
           type: propType,
           visibility,
-          isStatic,
-          isReadonly,
+          isStatic: options.isStatic,
+          isReadonly: options.isReadonly,
+          isAbstract: options.isAbstract,
+          isOptional: options.isOptional,
         });
 
         const normalizedType = propType.trim();
@@ -164,8 +174,8 @@ export class ClassParser {
         if (knownTypes.has(cleanType) && cleanType !== className) {
           structuralTargets.add(cleanType);
 
-          const hasDirectNew = initializer
-            ? this.containsNewExpression(initializer)
+          const hasDirectNew = options.initializer
+            ? this.containsNewExpression(options.initializer)
             : false;
           const isComposed =
             hasDirectNew || composedInConstructor.has(propName);
@@ -201,20 +211,23 @@ export class ClassParser {
           member,
           ts.SyntaxKind.ReadonlyKeyword,
         );
+        const isAbstract = this.hasModifier(
+          member,
+          ts.SyntaxKind.AbstractKeyword,
+        );
 
         if (ts.isPropertyDeclaration(member) && member.name) {
           const propName = member.name.getText(sourceFile);
           const propType = member.type
             ? member.type.getText(sourceFile)
             : "any";
-          registerFieldAndRelation(
-            propName,
-            propType,
-            visibility,
+          registerFieldAndRelation(propName, propType, visibility, {
             isStatic,
             isReadonly,
-            member.initializer,
-          );
+            isAbstract,
+            isOptional: Boolean(member.questionToken),
+            initializer: member.initializer,
+          });
         } else if (ts.isMethodDeclaration(member) && member.name) {
           const methodName = member.name.getText(sourceFile);
           const returnType = member.type
@@ -227,6 +240,7 @@ export class ClassParser {
             visibility,
             parameters: params,
             isStatic,
+            isAbstract,
           });
 
           this.collectDependencyTypesFromSignature(
@@ -253,13 +267,20 @@ export class ClassParser {
                 param,
                 ts.SyntaxKind.ReadonlyKeyword,
               );
+              const paramIsAbstract = this.hasModifier(
+                param,
+                ts.SyntaxKind.AbstractKeyword,
+              );
+            
               registerFieldAndRelation(
                 paramName,
                 paramType,
                 paramVisibility,
-                paramIsStatic,
-                paramIsReadonly,
-                param.initializer,
+                {isStatic: paramIsStatic,
+                isReadonly: paramIsReadonly,
+                isAbstract: paramIsAbstract,
+                isOptional: Boolean(param.questionToken),
+                initializer: param.initializer},
               );
             }
           }
@@ -347,6 +368,7 @@ export class ClassParser {
             type: propType,
             visibility,
             isReadonly,
+            isOptional: Boolean(member.questionToken)
           });
         } else if (ts.isMethodSignature(member) && member.name) {
           const methodName = member.name.getText(sourceFile);
@@ -424,8 +446,9 @@ export class ClassParser {
     return parameters
       .map((param) => {
         const paramName = param.name.getText(sourceFile);
+        const optionalMark = param.questionToken ? "?" : "";
         const paramType = param.type ? param.type.getText(sourceFile) : "any";
-        return `${paramName}: ${paramType}`;
+        return `${paramName}${optionalMark}: ${paramType}`;
       })
       .join(", ");
   }
