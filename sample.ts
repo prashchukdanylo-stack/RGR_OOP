@@ -12,10 +12,17 @@ class Animal {
     }
 }
 
-class Dog extends Animal {
+interface Swimmable {
+    swim() : void
+}
+interface Proswimmer extends Swimmable {
+    dive() : void
+}
+
+class Dog extends Animal implements Proswimmer {
     private breed: string;
-    private bestToy: Bone;
-    private constructor(name:string, age:number, breed:string, bestToy: Bone) {
+    private bestToy: Array<Bone>;
+    private constructor(name:string, age:number, breed:string, bestToy: Array<Bone>) {
         super(name, age);
         this.breed = breed;
         this.bestToy = bestToy;
@@ -28,6 +35,12 @@ class Dog extends Animal {
     }
     protected eatBone() : string {
         return "am nam nam";
+    }
+    public swim() : void {
+        console.log("bulbul");
+    }
+    public dive() : void {
+        console.log("bum");
     }
 }
 

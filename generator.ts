@@ -1,50 +1,86 @@
 import * as fs from "fs";
-import {ClassModel} from './parser';
+import { ClassModel, InterfaceModel } from "./parser";
 
 export class DiagramGenerator {
-    private classes: ClassModel[];
-    private outputPath: string;
-    private diagramPath:string;
+  private classes: ClassModel[];
+  private interfaces: InterfaceModel[];
+  private outputPath: string;
+  private diagramPath: string;
 
-    constructor(classes: ClassModel[], outputPath: string, diagramPath: string) {
-        this.classes = classes;
-        this.outputPath = outputPath;
-        this.diagramPath = diagramPath;
+  constructor(classes: ClassModel[], outputPath: string, diagramPath: string, interfaces: InterfaceModel[]) {
+    this.classes = classes;
+    this.interfaces = interfaces;
+    this.outputPath = outputPath;
+    this.diagramPath = diagramPath;
+  }
+
+  private formatMermaidType = (typeStr: string): string =>
+    typeStr.replace(/</g, "~").replace(/>/g, "~");
+
+  public generate(): void {
+    let mmdContext = "classDiagram\n";
+
+    for (const cls of this.classes) {
+      mmdContext += ` class ${cls.name} {\n`;
+
+      for (const field of cls.fields) {
+        const formattedType = this.formatMermaidType(field.type);
+        mmdContext += ` ${field.visibility}${field.name} : ${formattedType}\n`;
+      }
+      for (const method of cls.methods) {
+        const formattedParams = method.parameters ? this.formatMermaidType(method.parameters) : "";
+        const formattedReturn = this.formatMermaidType(method.type);
+        mmdContext += ` ${method.visibility}${method.name}(${formattedParams}) ${formattedReturn}\n`;
+      }
+      mmdContext += ` }\n\n`;
     }
 
-    public generate() : void {
-        let mmdContext = 'classDiagram\n';
-
-        for (const cls of this.classes) {
-            mmdContext += ` class ${cls.name} {\n`;
-
-            for (const field of cls.fields) {
-                mmdContext += ` ${field.visibility}${field.name} : ${field.type}\n`;
-            }
-            for (const method of cls.methods) {
-                mmdContext += ` ${method.visibility}${method.name}(${method.parameters})${method.type}\n`;
-            }
-            mmdContext += ` }\n\n`;
+    for (const iface of this.interfaces) {
+        mmdContext += ` class ${iface.name} {\n`;
+        mmdContext += ` <<interface>>\n`;
+        for (const field of iface.fields) {
+            const formattedType = this.formatMermaidType(field.type);
+            mmdContext += ` ${field.visibility}${field.name} : ${formattedType}\n`;
         }
-            for (const cls of this.classes) {
-                if (cls.extendsClass) {
-                mmdContext += ` ${cls.extendsClass} <|-- ${cls.name}\n`;
-            };
-            if (cls.relations) {
-                for (const rel of cls.relations) {
-                    if (rel.type === 'aggregation') {
-                        mmdContext += ` ${rel.to} o-- ${rel.from}\n`;
-                    } else {
-                        mmdContext += ` ${rel.to} --> ${rel.from}\n`;
-                    }
-            }
-            }
-            }
-
-
-        fs.writeFileSync(this.outputPath, mmdContext, 'utf-8');
-        const diagram = `\`\`\`mermaid\n${mmdContext}\`\`\`\n`;
-        console.log(diagram);
-        fs.writeFileSync(this.diagramPath, diagram, 'utf-8');
+        for (const method of iface.methods) {
+            const formattedParams = method.parameters ? this.formatMermaidType(method.parameters) : "";
+            const formattedReturn = this.formatMermaidType(method.type);
+            mmdContext += ` ${method.visibility}${method.name}(${formattedParams}) ${formattedReturn}\n`;
+        }
+        mmdContext += ` }\n\n`;
     }
+
+    for (const cls of this.classes) {
+      if (cls.extendsClass) {
+        mmdContext += ` ${cls.extendsClass} <|-- ${cls.name}\n`;
+      }
+      if (cls.relations) {
+        for (const rel of cls.relations) {
+          if (rel.type === "aggregation") {
+            mmdContext += ` ${rel.from} o-- ${rel.to}\n`;
+          } else {
+            mmdContext += ` ${rel.from} --> ${rel.to}\n`;
+          }
+        }
+      }
+      if (cls.implementsInterfaces) {
+        for (const iface of cls.implementsInterfaces) {
+          mmdContext += ` ${cls.name} ..|> ${iface}\n`;
+        }
+      }
+    }
+
+    for (const iface of this.interfaces) {
+        if (iface.extendsInterfaces) {
+            for (const parentIface of iface.extendsInterfaces) {
+                mmdContext += ` ${parentIface} <|-- ${iface.name}\n`;
+            }
+        }
+    }
+
+    fs.writeFileSync(this.outputPath, mmdContext, "utf-8");
+    const diagram = `\`\`\`mermaid\n${mmdContext}\`\`\`\n`;
+    console.log(diagram);
+    fs.writeFileSync(this.diagramPath, diagram, "utf-8");
+  }
 }

@@ -8,14 +8,14 @@ class Application {
         const outputFile = path.join(__dirname, "../output.mmd");
         const diagramFile = path.join(__dirname, "../diagram.md");
         const parser = new ClassParser(targetFile);
-        const parsedClasses = parser.parse();
+        const {classes, interfaces} = parser.parse();
 
-        if (parsedClasses.length === 0) {
+        if (classes.length === 0 && interfaces.length === 0) {
             console.log("Не знайдено жодного файлу");
             return;
         }
 
-        const generator = new DiagramGenerator(parsedClasses, outputFile,diagramFile);
+        const generator = new DiagramGenerator(classes, outputFile,diagramFile, interfaces);
         generator.generate();
     }
 }
